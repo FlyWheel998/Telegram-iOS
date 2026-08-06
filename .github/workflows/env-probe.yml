@@ -1,0 +1,52 @@
+name: Env Probe
+
+# Diagnostic, dispatch-only. Answers what the macOS runners actually carry,
+# so build decisions come from evidence rather than from docs that lag reality.
+on:
+  workflow_dispatch:
+
+jobs:
+  # Does the label versions.json implies even get allocated? Capped short so a
+  # dead label fails fast instead of burning 15 minutes waiting for a runner.
+  macos-26-allocation:
+    runs-on: macos-26
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - run: echo "macos-26 ALLOCATED"
+
+  inventory:
+    runs-on: macos-latest
+    steps:
+      - name: OS and default toolchain
+        run: |
+          sw_vers
+          echo "---- default xcodebuild ----"
+          xcodebuild -version
+          echo "---- default swift ----"
+          swift --version
+
+      - name: Installed Xcode versions
+        run: |
+          echo "---- /Applications/Xcode* ----"
+          ls -d /Applications/Xcode*.app 2>/dev/null || echo "none"
+          echo "---- versions of each ----"
+          for app in /Applications/Xcode*.app; do
+            v=$(defaults read "$app/Contents/Info" CFBundleShortVersionString 2>/dev/null || echo "?")
+            echo "$app -> $v"
+          done
+
+      - name: What versions.json wants
+        run: |
+          python3 -c 'import json;v=json.load(open("versions.json"));print("required xcode:",v["xcode"]);print("required bazel:",v["bazel"]);print("required macos:",v.get("macos"))'
+
+      - name: Bazel availability
+        run: |
+          which bazel bazelisk 2>/dev/null || echo "no bazel on PATH"
+          bazel --version 2>/dev/null || echo "(bazel not preinstalled; Make.py fetches its own)"
+
+      - name: Disk and memory headroom
+        run: |
+          df -h / /Users 2>/dev/null | head -5
+          sysctl -n hw.memsize | awk '{print "RAM bytes:", $1}'
+          sysctl -n hw.ncpu | awk '{print "CPUs:", $1}'
