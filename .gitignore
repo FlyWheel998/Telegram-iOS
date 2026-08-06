@@ -90,3 +90,8 @@ xcode-files
 **/node_modules/
 tools/sim-watcher/dist/
 .mcp.json
+
+# Personal build credentials (api_id / api_hash / team_id) - never commit.
+# This fork is public and these values are tied to the owner Telegram account.
+build-system/personal-configuration.json
+build-system/local-configuration.json

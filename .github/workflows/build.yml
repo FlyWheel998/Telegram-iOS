@@ -56,6 +56,44 @@ jobs:
           XCODE_VERSION=$(cat versions.json | python3 -c 'import json,sys;obj=json.load(sys.stdin);print(obj["xcode"]);')
           sudo xcode-select -s /Applications/Xcode_$XCODE_VERSION.app/Contents/Developer
 
+      # Credentials are injected from repository secrets and written to a gitignored file.
+      # They must never be committed: this fork is public, and api_id/api_hash are tied to
+      # the owner's Telegram account. The checked-in configuration JSONs carry Telegram's
+      # public test values (api_id 8), which cannot be used for a real personal build.
+      - name: Generate personal build configuration
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APP_BUNDLE_ID: ${{ secrets.APP_BUNDLE_ID }}
+        run: |
+          if [ -z "$TELEGRAM_API_ID" ] || [ -z "$TELEGRAM_API_HASH" ]; then
+            echo "::error::TELEGRAM_API_ID / TELEGRAM_API_HASH secrets are not set."
+            echo "Add them under Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+          python3 - <<'PY'
+          import json, os
+          config = {
+              "bundle_id": os.environ.get("APP_BUNDLE_ID") or "org.sgpersonal.Swiftgram",
+              "api_id": os.environ["TELEGRAM_API_ID"],
+              "api_hash": os.environ["TELEGRAM_API_HASH"],
+              "team_id": os.environ.get("APPLE_TEAM_ID", ""),
+              "app_center_id": "0",
+              "is_internal_build": "true",
+              "is_appstore_build": "false",
+              "appstore_id": "0",
+              "app_specific_url_scheme": "tg",
+              "premium_iap_product_id": "",
+              "enable_siri": False,
+              "enable_icloud": False,
+              "sg_config": "",
+          }
+          with open("build-system/personal-configuration.json", "w") as f:
+              json.dump(config, f, indent=2)
+          print("wrote build-system/personal-configuration.json")
+          PY
+
       - name: Create canonical source directory
         run: |
           set -x
@@ -88,7 +126,7 @@ jobs:
           python3 -u build-system/Make/Make.py \
             --bazelUserRoot="$BAZEL_USER_ROOT" \
             build \
-            --configurationPath="build-system/appstore-configuration.json" \
+            --configurationPath="build-system/personal-configuration.json" \
             --codesigningInformationPath=build-system/fake-codesigning \
             --configuration=release_arm64 \
             --buildNumber="$BUILD_NUMBER"
