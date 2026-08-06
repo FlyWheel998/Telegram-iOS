@@ -209,6 +209,28 @@ All 8 checks pass: Hebrew `מִלָּה→מלה`, Arabic `مُحَمَّد→م
 
 ---
 
+## F-015 — CI works; the module is verified on both Linux and Darwin ⭐
+**Date:** 2026-08-06 · **Confidence:** FACT · **Source:** run 31128587618
+
+```
+✓ logic-tests-darwin   23s   (macos-latest)
+✓ logic-tests          44s   (ubuntu-latest, container swift:6.1)
+  42 passed, 0 failed
+```
+
+`SGTextRemoval` + `SGRemovalRuleStore` **typecheck under `-warnings-as-errors` and pass all 42 tests on Apple's Foundation and on swift-corelibs-foundation.** Both agreeing matters: those two implementations diverge exactly where these tests probe (Unicode normalisation, `NSString` bridging, `NSRange` conversion).
+
+### Hard-won CI facts — do not re-derive
+
+1. **`runs-on: macos-26` is never allocated.** A job sat 15 min with `runner_name` empty and zero steps executed. `macos-latest` allocated in seconds. **This is a problem for the IPA build**, which needs Xcode 26.2 per `versions.json` — check what Xcode `macos-latest` carries and expect to need `Make.py --overrideXcodeVersion`.
+2. **A fork's workflows must be *indexed* before anything runs.** Until then GitHub reports `actions/workflows total_count: 0`, no runs fire, **and the Actions tab shows no enable banner** — because there is nothing to show a banner about. Pushing a trivial workflow to the **default branch** forces indexing. The "Allow all actions" permissions page is a *different* setting; it looked correct throughout and was never the cause.
+3. **Diagnose with `actions/workflows total_count`, not the UI.** Registered-but-zero-runs vs nothing-registered distinguishes "disabled" from "not indexed"; the UI cannot tell them apart. Checking this first would have saved ~6 rounds of guessing.
+4. **Push triggers do work but lag** while indexing settles. Early pushes appeared inert; a `push`-event run surfaced later.
+5. **Trigger with `gh`, not tokens.** `gh workflow run "CI" --ref <branch> -R FlyWheel998/Telegram-iOS`, then `gh run watch <id> --exit-status`. PATs pasted into shell commands get blocked by the safety classifier, and a leaked one is auto-revoked by GitHub. `gh` lives at `/c/Program Files/GitHub CLI` and may need adding to PATH per shell.
+6. **Force-pushing the default branch is blocked.** Undo with a normal commit instead.
+
+---
+
 ## Open assumptions (NOT yet validated)
 
 | # | Assumption | Confidence | Status |
