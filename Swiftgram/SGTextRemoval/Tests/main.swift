@@ -156,5 +156,117 @@ do {
     expect("all occurrences removed", !out.text.contains("ad"), "got \"\(out.text)\"")
 }
 
+// ================================================================ store
+
+func newStore() -> SGRemovalRuleStore { SGRemovalRuleStore(storage: SGInMemoryRuleStorage()) }
+
+do {
+    let s = newStore()
+    guard case .success(let rule) = s.add(text: "sponsored", peerId: CHANNEL) else {
+        expect("store: add succeeds", false); exit(1)
+    }
+    expect("store: add succeeds", true)
+    expect("store: rule readable for its peer", s.rules(forPeerId: CHANNEL).contains(rule))
+    expect("store: rule absent for other peer", s.rules(forPeerId: OTHER).isEmpty)
+}
+
+do {
+    let s = newStore()
+    _ = s.add(text: "sponsored", peerId: CHANNEL)
+    if case .failure(.duplicate) = s.add(text: "sponsored", peerId: CHANNEL) {
+        expect("store: exact duplicate rejected", true)
+    } else { expect("store: exact duplicate rejected", false) }
+}
+
+do {
+    // A rule differing only by case, spacing or vowel points is the same rule to the
+    // matcher, so the store must not let lookalikes accumulate.
+    let s = newStore()
+    _ = s.add(text: "מיוחד", peerId: CHANNEL)
+    if case .failure(.duplicate) = s.add(text: "מִיוּחָד", peerId: CHANNEL) {
+        expect("store: diacritic variant is a duplicate", true)
+    } else { expect("store: diacritic variant is a duplicate", false) }
+
+    let s2 = newStore()
+    _ = s2.add(text: "Sponsored Post", peerId: CHANNEL)
+    if case .failure(.duplicate) = s2.add(text: "sponsored   post", peerId: CHANNEL) {
+        expect("store: case/spacing variant is a duplicate", true)
+    } else { expect("store: case/spacing variant is a duplicate", false) }
+}
+
+do {
+    let s = newStore()
+    if case .failure(.empty) = s.add(text: "   \n ", peerId: CHANNEL) {
+        expect("store: empty selection rejected", true)
+    } else { expect("store: empty selection rejected", false) }
+
+    if case .failure(.tooShort) = s.add(text: "a", peerId: CHANNEL) {
+        expect("store: 1-char selection rejected", true)
+    } else { expect("store: 1-char selection rejected", false) }
+}
+
+do {
+    // An imprecise selection drag picks up surrounding whitespace.
+    let s = newStore()
+    guard case .success(let rule) = s.add(text: "  promo tail \n", peerId: CHANNEL) else {
+        expect("store: selection whitespace trimmed", false); exit(1)
+    }
+    expectEq("store: selection whitespace trimmed", rule.text, "promo tail")
+}
+
+do {
+    let s = newStore()
+    guard case .success(let rule) = s.add(text: "junk", peerId: CHANNEL) else { exit(1) }
+    expect("store: remove returns true", s.remove(id: rule.id))
+    expect("store: rule gone after remove", s.rules(forPeerId: CHANNEL).isEmpty)
+    expect("store: removing unknown id is false", !s.remove(id: "no-such-id"))
+}
+
+do {
+    let s = newStore()
+    guard case .success(let rule) = s.add(text: "junk", peerId: CHANNEL) else { exit(1) }
+    expect("store: peer reports rules present", !s.isEmpty(forPeerId: CHANNEL))
+    _ = s.setEnabled(false, id: rule.id)
+    expect("store: disabled rule makes peer empty", s.isEmpty(forPeerId: CHANNEL))
+    expect("store: disabled rule still listed for management", s.rules(forPeerId: CHANNEL).count == 1)
+}
+
+do {
+    // Rules must survive a relaunch, so the encoded form has to round-trip.
+    let backing = SGInMemoryRuleStorage()
+    let first = SGRemovalRuleStore(storage: backing)
+    _ = first.add(text: "persist me", peerId: CHANNEL)
+    _ = first.add(text: "למבזק המיוחד לחצו כאן", peerId: OTHER)
+
+    let reloaded = SGRemovalRuleStore(storage: backing)
+    expect("store: survives reload", reloaded.allRules().count == 2, "got \(reloaded.allRules().count)")
+    expectEq("store: unicode survives reload",
+             reloaded.rules(forPeerId: OTHER).first?.text ?? "<none>",
+             "למבזק המיוחד לחצו כאן")
+}
+
+do {
+    let s = newStore()
+    _ = s.add(text: "aaa", peerId: CHANNEL)
+    _ = s.add(text: "bbb", peerId: CHANNEL)
+    _ = s.add(text: "ccc", peerId: OTHER)
+    let groups = s.groupedByPeer()
+    let channelCount = groups.first(where: { $0.peerId == CHANNEL })?.rules.count
+    expect("store: grouped by peer", groups.count == 2 && channelCount == 2,
+           "\(groups.map { "\($0.peerId):\($0.rules.count)" })")
+    expect("store: removeAll for peer", s.removeAll(forPeerId: CHANNEL) == 2)
+    expect("store: other peer untouched", s.rules(forPeerId: OTHER).count == 1)
+}
+
+do {
+    // End to end: a rule added from a selection actually cleans the post it came from.
+    let s = newStore()
+    let post = "כותרת הידיעה החשובה\n\nלמבזק המיוחד לחצו כאן"
+    _ = s.add(text: "למבזק המיוחד לחצו כאן", peerId: CHANNEL)
+    let out = SGTextRemover.strip(text: post, entities: [],
+                                  rules: s.rules(forPeerId: CHANNEL), peerId: CHANNEL)
+    expectEq("end-to-end: stored rule cleans the post", out.text, "כותרת הידיעה החשובה")
+}
+
 print("\n\(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)
