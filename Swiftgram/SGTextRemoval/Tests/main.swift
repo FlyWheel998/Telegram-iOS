@@ -1,0 +1,160 @@
+import Foundation
+
+var passed = 0, failed = 0
+func expect(_ label: String, _ ok: Bool, _ detail: String = "") {
+    if ok { passed += 1; print("PASS  \(label)") }
+    else { failed += 1; print("FAIL  \(label)\(detail.isEmpty ? "" : "  -> \(detail)")") }
+}
+func expectEq(_ label: String, _ a: String, _ b: String) {
+    expect(label, a == b, "got \"\(a)\" expected \"\(b)\"")
+}
+
+let CHANNEL: Int64 = 1001
+let OTHER: Int64 = 2002
+
+// ---------------------------------------------------------------- basic
+do {
+    let r = [SGRemovalRule(text: " -- sponsored", peerId: CHANNEL)]
+    let out = SGTextRemover.strip(text: "Big news today -- sponsored", entities: [], rules: r, peerId: CHANNEL)
+    expectEq("basic strip", out.text, "Big news today")
+}
+
+// ---------------------------------------------------------------- real Hebrew footer (from desktop HANDOFF)
+do {
+    let footer = "למבזק המיוחד לחצו כאן"
+    let post = "כותרת הידיעה החשובה\n\n\(footer)"
+    let r = [SGRemovalRule(text: footer, peerId: CHANNEL)]
+    let out = SGTextRemover.strip(text: post, entities: [], rules: r, peerId: CHANNEL)
+    expectEq("hebrew footer removed", out.text, "כותרת הידיעה החשובה")
+}
+
+// ---------------------------------------------------------------- diacritic tolerance (the probe bug)
+do {
+    // Rule captured from UNPOINTED text; post arrives POINTED.
+    let r = [SGRemovalRule(text: "מיוחד", peerId: CHANNEL)]
+    let out = SGTextRemover.strip(text: "דיווח מִיוּחָד מהשטח", entities: [], rules: r, peerId: CHANNEL)
+    expect("unpointed rule matches pointed post", !out.text.contains("מִיוּחָד"), "got \"\(out.text)\"")
+}
+do {
+    // ...and the reverse: rule captured from POINTED text, post is unpointed.
+    let r = [SGRemovalRule(text: "מִיוּחָד", peerId: CHANNEL)]
+    let out = SGTextRemover.strip(text: "דיווח מיוחד מהשטח", entities: [], rules: r, peerId: CHANNEL)
+    expect("pointed rule matches unpointed post", !out.text.contains("מיוחד"), "got \"\(out.text)\"")
+}
+do {
+    let r = [SGRemovalRule(text: "محمد", peerId: CHANNEL)]
+    let out = SGTextRemover.strip(text: "قال مُحَمَّد اليوم", entities: [], rules: r, peerId: CHANNEL)
+    expect("arabic tashkeel tolerance", !out.text.contains("مُحَمَّد"), "got \"\(out.text)\"")
+}
+
+// ---------------------------------------------------------------- whitespace tolerance
+do {
+    let r = [SGRemovalRule(text: "click here now", peerId: CHANNEL)]
+    let out = SGTextRemover.strip(text: "Story.\n\nclick   here\nnow", entities: [], rules: r, peerId: CHANNEL)
+    expectEq("whitespace-variant footer removed", out.text, "Story.")
+}
+
+// ---------------------------------------------------------------- case tolerance
+do {
+    let r = [SGRemovalRule(text: "SPONSORED", peerId: CHANNEL)]
+    let out = SGTextRemover.strip(text: "News sponsored", entities: [], rules: r, peerId: CHANNEL)
+    expectEq("case-insensitive", out.text, "News")
+}
+
+// ---------------------------------------------------------------- scoping
+do {
+    let r = [SGRemovalRule(text: "junk", peerId: CHANNEL)]
+    let same = SGTextRemover.strip(text: "keep junk", entities: [], rules: r, peerId: CHANNEL)
+    let other = SGTextRemover.strip(text: "keep junk", entities: [], rules: r, peerId: OTHER)
+    expectEq("scoped rule fires in its channel", same.text, "keep")
+    expectEq("scoped rule silent elsewhere", other.text, "keep junk")
+}
+do {
+    let r = [SGRemovalRule(text: "junk", peerId: OTHER)]
+    let other = SGTextRemover.strip(text: "keep junk", entities: [], rules: r, peerId: OTHER)
+    expectEq("rule fires in its own channel only", other.text, "keep")
+}
+do {
+    let r = [SGRemovalRule(id: "x", text: "junk", peerId: CHANNEL, isEnabled: false)]
+    let out = SGTextRemover.strip(text: "keep junk", entities: [], rules: r, peerId: CHANNEL)
+    expectEq("disabled rule is inert", out.text, "keep junk")
+}
+
+// ---------------------------------------------------------------- no-op identity
+do {
+    let r = [SGRemovalRule(text: "absent", peerId: CHANNEL)]
+    let src = "nothing to do here"
+    let out = SGTextRemover.strip(text: src, entities: [], rules: r, peerId: CHANNEL)
+    expect("no match returns input unchanged", out.text == src)
+}
+
+// ---------------------------------------------------------------- entity handling
+do {
+    // "AAA BBB CCC" — link on CCC (loc 8 len 3). Remove "AAA " (loc 0 len 4).
+    let ent = [SGEntity(range: NSRange(location: 8, length: 3), kind: "url")]
+    let r = [SGRemovalRule(text: "AAA", peerId: CHANNEL)]
+    let out = SGTextRemover.strip(text: "AAA BBB CCC", entities: ent, rules: r, peerId: CHANNEL)
+    let e = out.entities.first
+    let slice = e.map { (out.text as NSString).substring(with: $0.range) } ?? "<none>"
+    expectEq("entity after cut still points at CCC", slice, "CCC")
+}
+do {
+    // Link on AAA (loc 0 len 3); remove trailing "CCC" — entity must not move.
+    let ent = [SGEntity(range: NSRange(location: 0, length: 3), kind: "url")]
+    let r = [SGRemovalRule(text: "CCC", peerId: CHANNEL)]
+    let out = SGTextRemover.strip(text: "AAA BBB CCC", entities: ent, rules: r, peerId: CHANNEL)
+    let slice = out.entities.first.map { (out.text as NSString).substring(with: $0.range) } ?? "<none>"
+    expectEq("entity before cut unmoved", slice, "AAA")
+}
+do {
+    // Entity sits entirely inside the removed span -> must be dropped, not left dangling.
+    let ent = [SGEntity(range: NSRange(location: 4, length: 3), kind: "bold")]
+    let r = [SGRemovalRule(text: "BBB", peerId: CHANNEL)]
+    let out = SGTextRemover.strip(text: "AAA BBB CCC", entities: ent, rules: r, peerId: CHANNEL)
+    expect("entity inside cut dropped", out.entities.isEmpty, "left \(out.entities.count)")
+}
+do {
+    // Entity straddles the cut boundary -> clipped, and must stay in bounds.
+    let ent = [SGEntity(range: NSRange(location: 0, length: 7), kind: "bold")]  // "AAA BBB"
+    let r = [SGRemovalRule(text: "BBB", peerId: CHANNEL)]
+    let out = SGTextRemover.strip(text: "AAA BBB CCC", entities: ent, rules: r, peerId: CHANNEL)
+    let ns = out.text as NSString
+    let e = out.entities.first
+    let inBounds = e.map { $0.range.location + $0.range.length <= ns.length } ?? false
+    expect("straddling entity clipped in-bounds", inBounds,
+           "text=\"\(out.text)\" len=\(ns.length) ent=\(String(describing: e?.range))")
+}
+
+// ---------------------------------------------------------------- emoji offsets
+do {
+    // Emoji is 2 UTF-16 units; entity offsets must survive a cut placed after it.
+    let src = "hi 👋 promo tail"
+    let ent = [SGEntity(range: NSRange(location: 0, length: 2), kind: "bold")]  // "hi"
+    let r = [SGRemovalRule(text: "promo tail", peerId: CHANNEL)]
+    let out = SGTextRemover.strip(text: src, entities: ent, rules: r, peerId: CHANNEL)
+    let slice = out.entities.first.map { (out.text as NSString).substring(with: $0.range) } ?? "<none>"
+    expectEq("entity intact across emoji", slice, "hi")
+    expectEq("emoji preserved", out.text, "hi 👋")
+}
+
+// ---------------------------------------------------------------- multiple + overlapping
+do {
+    let r = [SGRemovalRule(text: "one", peerId: CHANNEL), SGRemovalRule(text: "three", peerId: CHANNEL)]
+    let out = SGTextRemover.strip(text: "one two three", entities: [], rules: r, peerId: CHANNEL)
+    expectEq("two rules both applied", out.text, "two")
+}
+do {
+    let merged = SGTextRemover.merge([NSRange(location: 0, length: 5), NSRange(location: 3, length: 5)])
+    expect("overlapping ranges merged", merged.count == 1 && merged[0].length == 8,
+           "\(merged.map { "\($0.location)+\($0.length)" })")
+}
+
+// ---------------------------------------------------------------- repeated occurrences
+do {
+    let r = [SGRemovalRule(text: "ad", peerId: CHANNEL)]
+    let out = SGTextRemover.strip(text: "ad news ad sport ad", entities: [], rules: r, peerId: CHANNEL)
+    expect("all occurrences removed", !out.text.contains("ad"), "got \"\(out.text)\"")
+}
+
+print("\n\(passed) passed, \(failed) failed")
+exit(failed == 0 ? 0 : 1)

@@ -1,17 +1,52 @@
 name: CI
 
 on:
-  # push:
-  #   branches: [ master ]
-
+  push:
+    branches: [ sg-custom-features ]
   workflow_dispatch:
+    inputs:
+      build_ipa:
+        description: 'Also run the full IPA build (~1-2 hours)'
+        type: boolean
+        default: false
 
 jobs:
-  build:
-    runs-on: macos-13
+  # Fast feedback (~2 min). Our custom modules are pure-Foundation by design,
+  # so they can be typechecked and unit-tested without Bazel, Xcode projects,
+  # or the full app graph. This catches logic regressions and warnings long
+  # before committing an hour to a full build.
+  logic-tests:
+    runs-on: macos-26
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          XCODE_VERSION=$(python3 -c 'import json;print(json.load(open("versions.json"))["xcode"])')
+          sudo xcode-select -s /Applications/Xcode_$XCODE_VERSION.app/Contents/Developer
+          swift --version
+
+      - name: Typecheck SGTextRemoval (warnings are errors, matching Bazel copts)
+        run: |
+          swiftc -warnings-as-errors -typecheck \
+            Swiftgram/SGTextRemoval/Sources/SGTextRemoval.swift
+
+      - name: Run SGTextRemoval unit tests
+        run: |
+          swiftc -warnings-as-errors \
+            Swiftgram/SGTextRemoval/Sources/SGTextRemoval.swift \
+            Swiftgram/SGTextRemoval/Tests/main.swift \
+            -o "$RUNNER_TEMP/sgtextremoval-tests"
+          "$RUNNER_TEMP/sgtextremoval-tests"
+
+  ipa:
+    runs-on: macos-26
+    needs: logic-tests
+    if: github.event_name == 'workflow_dispatch' && inputs.build_ipa
+
+    steps:
+      - uses: actions/checkout@v4
         with:
           submodules: 'recursive'
           fetch-depth: '0'
@@ -73,37 +108,21 @@ jobs:
           done
           zip -r "./$OUTPUT_PATH/Telegram.DSYMs.zip" build/DSYMs 1>/dev/null
 
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # The previous actions/create-release@v1 and actions/upload-release-asset@v1
+      # are archived and no longer function. Artifacts are also a better fit here:
+      # the IPA is downloaded, signed locally and sideloaded, not published.
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: build-${{ env.BUILD_NUMBER }}
-          release_name: Telegram ${{ env.APP_VERSION }} (${{ env.BUILD_NUMBER }})
-          body: |
-            An unsigned build of Telegram for iOS ${{ env.APP_VERSION }} (${{ env.BUILD_NUMBER }})
-          draft: false
-          prerelease: false
+          name: Telegram-unsigned-${{ env.BUILD_NUMBER }}
+          path: /Users/Shared/telegram-ios/build/artifacts/Telegram.ipa
+          if-no-files-found: error
+          retention-days: 14
 
-      - name: Upload Release IPA
-        id: upload-release-ipa 
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload dSYM artifact
+        uses: actions/upload-artifact@v4
         with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: /Users/Shared/telegram-ios/build/artifacts/Telegram.ipa
-          asset_name: Telegram.ipa
-          asset_content_type: application/zip
-
-      - name: Upload Release DSYM
-        id: upload-release-dsym 
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: /Users/Shared/telegram-ios/build/artifacts/Telegram.DSYMs.zip
-          asset_name: Telegram.DSYMs.zip
-          asset_content_type: application/zip
+          name: Telegram-DSYMs-${{ env.BUILD_NUMBER }}
+          path: /Users/Shared/telegram-ios/build/artifacts/Telegram.DSYMs.zip
+          if-no-files-found: warn
+          retention-days: 14
