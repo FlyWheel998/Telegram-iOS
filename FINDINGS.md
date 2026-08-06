@@ -222,12 +222,32 @@ All 8 checks pass: Hebrew `מִלָּה→מלה`, Arabic `مُحَمَّد→م
 
 ### Hard-won CI facts — do not re-derive
 
-1. **`runs-on: macos-26` is never allocated.** A job sat 15 min with `runner_name` empty and zero steps executed. `macos-latest` allocated in seconds. **This is a problem for the IPA build**, which needs Xcode 26.2 per `versions.json` — check what Xcode `macos-latest` carries and expect to need `Make.py --overrideXcodeVersion`.
+1. ~~**`runs-on: macos-26` is never allocated.**~~ **WRONG — corrected below (F-016).** One job did sit 15 min with `runner_name` empty and zero steps, but a later probe allocated `macos-26` in **4 seconds**. That was transient capacity or a manual cancel, not a dead label.
 2. **A fork's workflows must be *indexed* before anything runs.** Until then GitHub reports `actions/workflows total_count: 0`, no runs fire, **and the Actions tab shows no enable banner** — because there is nothing to show a banner about. Pushing a trivial workflow to the **default branch** forces indexing. The "Allow all actions" permissions page is a *different* setting; it looked correct throughout and was never the cause.
 3. **Diagnose with `actions/workflows total_count`, not the UI.** Registered-but-zero-runs vs nothing-registered distinguishes "disabled" from "not indexed"; the UI cannot tell them apart. Checking this first would have saved ~6 rounds of guessing.
 4. **Push triggers do work but lag** while indexing settles. Early pushes appeared inert; a `push`-event run surfaced later.
 5. **Trigger with `gh`, not tokens.** `gh workflow run "CI" --ref <branch> -R FlyWheel998/Telegram-iOS`, then `gh run watch <id> --exit-status`. PATs pasted into shell commands get blocked by the safety classifier, and a leaked one is auto-revoked by GitHub. `gh` lives at `/c/Program Files/GitHub CLI` and may need adding to PATH per shell.
 6. **Force-pushing the default branch is blocked.** Undo with a normal commit instead.
+
+---
+
+## F-016 — macOS runners carry Xcode 26.2; the Bazel build path is viable ⭐
+**Date:** 2026-08-06 · **Confidence:** FACT · **Source:** Env Probe run 31128779481
+
+```
+job macos-26-allocation   ✓ 4s            <- the label works
+macos-latest              macOS 26.5.2, default Xcode 26.6, Swift 6.3.3, arm64
+/Applications/Xcode*.app  26.0, 26.0.1, 26.1, 26.1.1, 26.2, 26.3, 26.4, 26.4.1, 26.5, 26.6
+```
+
+**`/Applications/Xcode_26.2.app` is present**, which is exactly what `versions.json` pins. The existing workflow step (`xcode-select -s /Applications/Xcode_$XCODE_VERSION.app/...` with `XCODE_VERSION=26.2`) resolves correctly with no change. **No `--overrideXcodeVersion` needed.** Supersedes the CI-fact #1 in F-015.
+
+**Consequence — the secrets are NOT on the critical path.** Verifying that integration code *compiles* can use the checked-in `build-system/appstore-configuration.json` (Telegram's public test values, api_id 8). Real `api_id`/`api_hash`/`team_id` are only required for a build that will actually be installed and logged into. So integration work can proceed and be compile-verified before the user supplies anything.
+
+**Still unknown:** whether the full Bazel build succeeds, and how long it takes on a GitHub runner. That is the next thing to establish, and it is the only way to typecheck code importing `TelegramCore` / `Display` / `Postbox` — the Linux fast lane cannot touch those.
+
+### Additional CI fact
+7. **`workflow_dispatch` resolves workflows from the DEFAULT branch only.** `gh workflow run env-probe.yml --ref sg-custom-features` returned `HTTP 404: workflow env-probe.yml not found on the default branch`. This is the real explanation for the earlier confusion: "CI" was dispatchable purely because upstream's `build.yml` already exists on `master`. **Any new workflow must be committed to `master` before it can be dispatched from any branch.**
 
 ---
 
