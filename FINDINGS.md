@@ -251,6 +251,31 @@ macos-latest              macOS 26.5.2, default Xcode 26.6, Swift 6.3.3, arm64
 
 ---
 
+## F-017 — `Make.py build` structurally requires push-entitled provisioning profiles ⭐
+**Date:** 2026-08-06 · **Confidence:** FACT · **Source:** read of `build-system/Make/Make.py` and `build-system/Make/BuildConfiguration.py`
+
+`Make.py build` → `resolve_configuration()` → unconditional, no bypass:
+
+```python
+if codesigning_data.aps_environment is None:
+    print('Could not find a valid aps-environment entitlement in the provided provisioning profiles')
+    sys.exit(1)
+```
+
+`--disableProvisioningProfiles` — which the README advertises for "simulator-only builds" — is defined on **`generateProjectParser` only**. Verified by enumerating every subparser in the file: `generateProject`, `build`, `query`, `spm`; the flag appears on `generateProject` alone.
+
+**Therefore there is no compile-only mode for `build`.** Consequences:
+
+1. **Any custom `bundle_id` fails this check**, always. The bundled `build-system/fake-codesigning` carries one profile set, bound to Telegram's own `ph.telegra.Telegraph`. A CI compile check must therefore build as that bundle id.
+2. **An installable app with a custom bundle id needs a real provisioning profile from the owner's Apple Developer account, with the Push Notifications capability enabled.** Not just `api_id`/`api_hash`/`team_id` — an actual `.mobileprovision`. This sits between "compiles" and "runs on the phone" and was previously unaccounted for.
+3. `generateProject --disableProvisioningProfiles` is the sanctioned route for a simulator build, but it emits an Xcode project rather than building — useful later for simulator verification, not for CI compile checks.
+
+**Separately — the two checked-in configuration JSONs are unusable with this fork.** `build_configuration_from_json` lists `sg_config` in `required_keys`, but `appstore-configuration.json` and `appcenter-configuration.json` (inherited from upstream Telegram) omit it; only Swiftgram's `template_minimal_development_configuration.json` defines it. The key is written into `variables.bzl` as `sg_config = """{}"""`; empty string is valid.
+
+**Process note:** three failed builds were spent pattern-matching on error strings and re-running. Reading `Make.py` first would have yielded all of this at once. For any further build-system failure: **read the build system before changing configuration.**
+
+---
+
 ## Open assumptions (NOT yet validated)
 
 | # | Assumption | Confidence | Status |
