@@ -100,8 +100,22 @@ jobs:
           # CI build. Producing an installable app needs real provisioning profiles from the
           # owner's Apple Developer account, not just secrets.
           if [ -z "$TELEGRAM_API_ID" ] || [ -z "$TELEGRAM_API_HASH" ]; then
-            echo "::warning::No Telegram API secrets set - using the stock appstore configuration for a compile-only build. The result is not installable."
-            echo "BUILD_CONFIG_PATH=build-system/appstore-configuration.json" >> $GITHUB_ENV
+            echo "::warning::No Telegram API secrets set - compile-only build using Telegram's bundle id and public test credentials. The result is not installable."
+            # Keep Telegram's bundle_id and team_id so the fake-codesigning profiles match,
+            # but inject sg_config: Swiftgram's BuildConfiguration.py requires that key and
+            # the configuration JSONs inherited from upstream Telegram do not define it.
+            python3 - <<'PY'
+          import json
+          with open("build-system/appstore-configuration.json") as f:
+              config = json.load(f)
+          config.setdefault("sg_config", "")
+          config["api_id"] = "8"
+          config["api_hash"] = "7245de8e747a0d6fbe11f7cc14fcc0bb"
+          with open("build-system/personal-configuration.json", "w") as f:
+              json.dump(config, f, indent=2)
+          print("compile-only configuration written (bundle_id %s)" % config["bundle_id"])
+          PY
+            echo "BUILD_CONFIG_PATH=build-system/personal-configuration.json" >> $GITHUB_ENV
             exit 0
           fi
           echo "BUILD_CONFIG_PATH=build-system/personal-configuration.json" >> $GITHUB_ENV
