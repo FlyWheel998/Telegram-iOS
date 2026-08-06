@@ -11,37 +11,60 @@ on:
         default: false
 
 jobs:
-  # Fast feedback (~2 min). Our custom modules are pure-Foundation by design,
-  # so they can be typechecked and unit-tested without Bazel, Xcode projects,
-  # or the full app graph. This catches logic regressions and warnings long
-  # before committing an hour to a full build.
+  # Fast lane. Our custom modules are pure-Foundation by design, so they need
+  # neither Xcode nor macOS to typecheck and test. Linux runners are plentiful
+  # and start in seconds; a free macOS runner sat unallocated for 15 minutes on
+  # the first attempt. This is the loop used while fixing errors.
   logic-tests:
-    runs-on: macos-26
+    runs-on: ubuntu-latest
+    container: swift:6.1
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Select Xcode
-        run: |
-          XCODE_VERSION=$(python3 -c 'import json;print(json.load(open("versions.json"))["xcode"])')
-          sudo xcode-select -s /Applications/Xcode_$XCODE_VERSION.app/Contents/Developer
-          swift --version
+      - name: Swift version
+        run: swift --version
 
       - name: Typecheck SGTextRemoval (warnings are errors, matching Bazel copts)
         run: |
           swiftc -warnings-as-errors -typecheck \
-            Swiftgram/SGTextRemoval/Sources/SGTextRemoval.swift
+            Swiftgram/SGTextRemoval/Sources/SGTextRemoval.swift \
+            Swiftgram/SGTextRemoval/Sources/SGRemovalRuleStore.swift
 
       - name: Run SGTextRemoval unit tests
         run: |
           swiftc -warnings-as-errors \
             Swiftgram/SGTextRemoval/Sources/SGTextRemoval.swift \
+            Swiftgram/SGTextRemoval/Sources/SGRemovalRuleStore.swift \
+            Swiftgram/SGTextRemoval/Tests/main.swift \
+            -o "$RUNNER_TEMP/sgtextremoval-tests"
+          "$RUNNER_TEMP/sgtextremoval-tests"
+
+  # The same tests on Darwin. Linux uses swift-corelibs-foundation, which differs
+  # from Apple's Foundation in precisely the areas these tests probe (Unicode
+  # normalisation, NSString bridging), so Linux passing is necessary but not
+  # sufficient. Non-blocking, so a slow macOS queue never stalls the fast lane.
+  logic-tests-darwin:
+    runs-on: macos-latest
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Run SGTextRemoval unit tests on Darwin
+        run: |
+          swiftc -warnings-as-errors \
+            Swiftgram/SGTextRemoval/Sources/SGTextRemoval.swift \
+            Swiftgram/SGTextRemoval/Sources/SGRemovalRuleStore.swift \
             Swiftgram/SGTextRemoval/Tests/main.swift \
             -o "$RUNNER_TEMP/sgtextremoval-tests"
           "$RUNNER_TEMP/sgtextremoval-tests"
 
   ipa:
-    runs-on: macos-26
+    runs-on: macos-26  # Xcode 26.2 required by versions.json
     needs: logic-tests
     if: github.event_name == 'workflow_dispatch' && inputs.build_ipa
 
