@@ -178,20 +178,31 @@ jobs:
             --configuration=release_arm64 \
             --buildNumber="$BUILD_NUMBER"
 
-          # collect ipa
+          # Collect artifacts by searching rather than by hardcoded path. The inherited
+          # workflow looked for "Telegram.ipa", but this fork builds target
+          # //Telegram:Swiftgram and emits Swiftgram.ipa - so the original glob silently
+          # matched nothing and the build "failed" after compiling successfully.
           OUTPUT_PATH="build/artifacts"
           rm -rf "$OUTPUT_PATH"
           mkdir -p "$OUTPUT_PATH"
-          for f in bazel-out/applebin_ios-ios_arm*-opt-ST-*/bin/Telegram/Telegram.ipa; do
-            cp "$f" $OUTPUT_PATH/
-          done
 
-          # collect dsym
+          IPA_PATH="$(find -L bazel-bin bazel-out -name '*.ipa' -type f 2>/dev/null | head -1)"
+          if [ -z "$IPA_PATH" ]; then
+            echo "::error::Build reported success but no .ipa was produced."
+            find -L bazel-bin -maxdepth 3 -name '*.app' -o -maxdepth 3 -name '*.ipa' 2>/dev/null | head -20
+            exit 1
+          fi
+          echo "found IPA: $IPA_PATH"
+          cp "$IPA_PATH" "$OUTPUT_PATH/"
+
           mkdir -p build/DSYMs
-          for f in bazel-out/applebin_ios-ios_arm*-opt-ST-*/bin/Telegram/*.dSYM; do
-            cp -R "$f" build/DSYMs/
+          find -L bazel-bin -maxdepth 3 -name '*.dSYM' -type d 2>/dev/null | while read -r d; do
+            cp -R "$d" build/DSYMs/ 2>/dev/null || true
           done
-          zip -r "./$OUTPUT_PATH/Telegram.DSYMs.zip" build/DSYMs 1>/dev/null
+          if [ -n "$(ls -A build/DSYMs 2>/dev/null)" ]; then
+            zip -r "./$OUTPUT_PATH/DSYMs.zip" build/DSYMs 1>/dev/null
+          fi
+          ls -la "$OUTPUT_PATH"
 
       # The previous actions/create-release@v1 and actions/upload-release-asset@v1
       # are archived and no longer function. Artifacts are also a better fit here:
@@ -199,15 +210,15 @@ jobs:
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Telegram-unsigned-${{ env.BUILD_NUMBER }}
-          path: /Users/Shared/telegram-ios/build/artifacts/Telegram.ipa
+          name: Swiftgram-unsigned-${{ env.BUILD_NUMBER }}
+          path: /Users/Shared/telegram-ios/build/artifacts/*.ipa
           if-no-files-found: error
           retention-days: 14
 
       - name: Upload dSYM artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Telegram-DSYMs-${{ env.BUILD_NUMBER }}
-          path: /Users/Shared/telegram-ios/build/artifacts/Telegram.DSYMs.zip
+          name: Swiftgram-DSYMs-${{ env.BUILD_NUMBER }}
+          path: /Users/Shared/telegram-ios/build/artifacts/DSYMs.zip
           if-no-files-found: warn
           retention-days: 14
