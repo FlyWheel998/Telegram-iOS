@@ -90,14 +90,21 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APP_BUNDLE_ID: ${{ secrets.APP_BUNDLE_ID }}
         run: |
-          # Without real credentials the build still compiles - it just produces an app
-          # that cannot log in. That is fine for verifying integration code, so fall back
-          # to Telegram's public test values rather than failing the run.
+          # The bundled fake-codesigning provisioning profiles are bound to Telegram's own
+          # bundle id (ph.telegra.Telegraph) and carry its entitlements, including
+          # aps-environment. A custom bundle id therefore cannot be signed with them -
+          # Make.py aborts with "Could not find a valid aps-environment entitlement".
+          #
+          # So: no secrets -> use the stock appstore configuration, which matches the fake
+          # profiles. This compiles and verifies integration code, which is the point of a
+          # CI build. Producing an installable app needs real provisioning profiles from the
+          # owner's Apple Developer account, not just secrets.
           if [ -z "$TELEGRAM_API_ID" ] || [ -z "$TELEGRAM_API_HASH" ]; then
-            echo "::warning::TELEGRAM_API_ID / TELEGRAM_API_HASH not set - building with public test credentials (api_id 8). The resulting app compiles but cannot sign in. Add the secrets under Settings -> Secrets and variables -> Actions to produce an installable build."
-            export TELEGRAM_API_ID=8
-            export TELEGRAM_API_HASH=7245de8e747a0d6fbe11f7cc14fcc0bb
+            echo "::warning::No Telegram API secrets set - using the stock appstore configuration for a compile-only build. The result is not installable."
+            echo "BUILD_CONFIG_PATH=build-system/appstore-configuration.json" >> $GITHUB_ENV
+            exit 0
           fi
+          echo "BUILD_CONFIG_PATH=build-system/personal-configuration.json" >> $GITHUB_ENV
           python3 - <<'PY'
           import json, os
           config = {
@@ -152,7 +159,7 @@ jobs:
           python3 -u build-system/Make/Make.py \
             --bazelUserRoot="$BAZEL_USER_ROOT" \
             build \
-            --configurationPath="build-system/personal-configuration.json" \
+            --configurationPath="$BUILD_CONFIG_PATH" \
             --codesigningInformationPath=build-system/fake-codesigning \
             --configuration=release_arm64 \
             --buildNumber="$BUILD_NUMBER"
