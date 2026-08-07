@@ -89,11 +89,13 @@ public func sgTextRemovalController(context: AccountContext) -> ViewController {
         }
     )
 
-    let signal = combineLatest(
+    // Explicitly typed. The nested engine lookup inside mapToSignal leaves
+    // ItemListController's ItemGenerationArguments un-inferrable otherwise.
+    let signal: Signal<(ItemListControllerState, (ItemListNodeState, SGItemListArguments<AnyHashable, AnyHashable, AnyHashable, AnyHashable, SGTextRemovalAction>)), NoError> = combineLatest(
         context.sharedContext.presentationData,
         reloadPromise.get()
     )
-    |> mapToSignal { presentationData, _ -> Signal<(ItemListControllerState, (ItemListNodeState, Any)), NoError> in
+    |> mapToSignal { presentationData, _ -> Signal<(ItemListControllerState, (ItemListNodeState, SGItemListArguments<AnyHashable, AnyHashable, AnyHashable, AnyHashable, SGTextRemovalAction>)), NoError> in
         let rules = SGTextRemovalService.shared.allRules()
         let peerIds = Array(Set(rules.map { PeerId($0.peerId) }))
 
@@ -101,11 +103,11 @@ public func sgTextRemovalController(context: AccountContext) -> ViewController {
         return context.engine.data.get(
             EngineDataMap(peerIds.map { TelegramEngine.EngineData.Item.Peer.Peer(id: $0) })
         )
-        |> map { peerMap -> (ItemListControllerState, (ItemListNodeState, Any)) in
+        |> map { peerMap -> (ItemListControllerState, (ItemListNodeState, SGItemListArguments<AnyHashable, AnyHashable, AnyHashable, AnyHashable, SGTextRemovalAction>)) in
             let resolved: [SGResolvedRule] = rules.map { rule in
                 let peerId = PeerId(rule.peerId)
                 let title = peerMap[peerId].flatMap { $0 }?.compactDisplayTitle
-                    ?? presentationData.strings.Conversation_DeletedChat
+                    ?? presentationData.strings.User_DeletedAccount
                 return SGResolvedRule(rule: rule, peerTitle: title)
             }
             // Group rules from the same chat together, then keep a stable order within a chat.
