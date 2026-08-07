@@ -279,6 +279,13 @@ public final class TextSelectionNode: ASDisplayNode {
     public private(set) var recognizer: TextSelectionGestureRecognizer?
     private var displayLinkAnimator: DisplayLinkAnimator?
     
+    // MARK: Swiftgram
+    /// When set, the selection menu offers an extra entry that hands the selected plain text
+    /// back to the owner. The title is supplied by the caller rather than read from
+    /// PresentationStrings, and the peer is resolved by the caller too, so this module gains
+    /// no dependency on TelegramCore or on Swiftgram's own localisation.
+    public var sgExtraAction: (title: String, action: (String) -> Void)?
+
     public var enableCopy: Bool = true
     public var enableLookup: Bool = true
     public var enableQuote: Bool = false
@@ -795,6 +802,14 @@ public final class TextSelectionNode: ASDisplayNode {
             }
         }
         
+        // MARK: Swiftgram
+        if let sgExtraAction = self.sgExtraAction {
+            actions.append(ContextMenuAction(content: .text(title: sgExtraAction.title, accessibilityLabel: sgExtraAction.title), action: { [weak self] in
+                sgExtraAction.action(string.string)
+                self?.cancelSelection()
+            }))
+        }
+
         let realFullRange = NSRange(location: 0, length: attributedString.length)
         if range != realFullRange {
             actions.append(ContextMenuAction(content: .text(title: self.strings.TextSelection_SelectAll, accessibilityLabel: self.strings.TextSelection_SelectAll), action: { [weak self] in

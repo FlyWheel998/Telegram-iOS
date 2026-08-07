@@ -5,6 +5,7 @@ import Display
 import TelegramCore
 // MARK: Swiftgram
 import SGTextRemoval
+import SGStrings
 import TextFormat
 import UrlEscaping
 import TelegramUniversalVideoContent
@@ -1673,6 +1674,22 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
                     }
                     item.controllerInteraction.performTextSelectionAction(item.message, true, text, nil, action)
                 })
+                // MARK: Swiftgram - offer "remove this text from posts" on a selection.
+                // TextSelectionNode has no peer and no access to Swiftgram's localisation, so
+                // both the title and the handler are supplied from here.
+                textSelectionNode.sgExtraAction = (
+                    title: i18n("TextRemoval.RemoveFromPosts", item.presentationData.strings.baseLanguageCode),
+                    action: { [weak self] selectedText in
+                        guard let self, let item = self.item else {
+                            return
+                        }
+                        let peerId = item.message.id.peerId.toInt64()
+                        if case .success = SGTextRemovalService.shared.add(text: selectedText, peerId: peerId) {
+                            item.controllerInteraction.requestMessageUpdate(item.message.id, false, nil)
+                        }
+                    }
+                )
+
                 textSelectionNode.updateRange = { [weak self] selectionRange in
                     guard let strongSelf = self else {
                         return

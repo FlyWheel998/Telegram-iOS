@@ -11,6 +11,7 @@ swift_library(
     ],
     deps = [
         "//Swiftgram/SGTextRemoval:SGTextRemoval",
+        "//Swiftgram/SGStrings:SGStrings",
         "//submodules/AsyncDisplayKit",
         "//submodules/Display",
         "//submodules/TelegramCore",
