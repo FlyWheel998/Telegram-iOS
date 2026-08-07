@@ -25,17 +25,17 @@ jobs:
       - name: Swift version
         run: swift --version
 
+      # Sources are globbed, not listed. Listing them by name silently excluded newly
+      # added files twice, which surfaced as a confusing "cannot find type in scope"
+      # rather than as a missing-file error. The Bazel BUILD already globs; match it.
       - name: Typecheck SGTextRemoval (warnings are errors, matching Bazel copts)
         run: |
-          swiftc -warnings-as-errors -typecheck \
-            Swiftgram/SGTextRemoval/Sources/SGTextRemoval.swift \
-            Swiftgram/SGTextRemoval/Sources/SGRemovalRuleStore.swift
+          swiftc -warnings-as-errors -typecheck Swiftgram/SGTextRemoval/Sources/*.swift
 
       - name: Run SGTextRemoval unit tests
         run: |
           swiftc -warnings-as-errors \
-            Swiftgram/SGTextRemoval/Sources/SGTextRemoval.swift \
-            Swiftgram/SGTextRemoval/Sources/SGRemovalRuleStore.swift \
+            Swiftgram/SGTextRemoval/Sources/*.swift \
             Swiftgram/SGTextRemoval/Tests/main.swift \
             -o "$RUNNER_TEMP/sgtextremoval-tests"
           "$RUNNER_TEMP/sgtextremoval-tests"
@@ -57,8 +57,7 @@ jobs:
       - name: Run SGTextRemoval unit tests on Darwin
         run: |
           swiftc -warnings-as-errors \
-            Swiftgram/SGTextRemoval/Sources/SGTextRemoval.swift \
-            Swiftgram/SGTextRemoval/Sources/SGRemovalRuleStore.swift \
+            Swiftgram/SGTextRemoval/Sources/*.swift \
             Swiftgram/SGTextRemoval/Tests/main.swift \
             -o "$RUNNER_TEMP/sgtextremoval-tests"
           "$RUNNER_TEMP/sgtextremoval-tests"
