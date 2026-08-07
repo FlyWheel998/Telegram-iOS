@@ -317,5 +317,68 @@ do {
     expect("range API: empty result", out.mappedRanges.isEmpty)
 }
 
+// ================================================================ service
+
+func newService() -> SGTextRemovalService {
+    return SGTextRemovalService(store: SGRemovalRuleStore(storage: SGInMemoryRuleStorage()))
+}
+
+do {
+    let svc = newService()
+    expect("service: no rules initially", !svc.hasRules(forPeerId: CHANNEL))
+    _ = svc.add(text: "promo tail", peerId: CHANNEL)
+    expect("service: hasRules after add", svc.hasRules(forPeerId: CHANNEL))
+    expect("service: other peer unaffected", !svc.hasRules(forPeerId: OTHER))
+    expectEq("service: strips", svc.strip(text: "Story. promo tail", peerId: CHANNEL), "Story.")
+    expectEq("service: leaves other peers alone", svc.strip(text: "Story. promo tail", peerId: OTHER), "Story. promo tail")
+}
+
+do {
+    // The render fast path: no rules must return the input by identity, not a rebuilt copy.
+    let svc = newService()
+    let input = [NSRange(location: 0, length: 3)]
+    let out = svc.strip(text: "untouched text", entityRanges: input, peerId: CHANNEL)
+    expectEq("service: no-rules fast path text", out.text, "untouched text")
+    expect("service: no-rules fast path ranges", out.mappedRanges.first! == input[0])
+}
+
+do {
+    // Adding a rule must notify, so the open chat can repaint immediately.
+    let svc = newService()
+    var fired = 0
+    let token = svc.observeChanges { fired += 1 }
+    _ = svc.add(text: "aaa", peerId: CHANNEL)
+    expect("service: add notifies", fired == 1, "fired=\(fired)")
+
+    _ = svc.add(text: "aaa", peerId: CHANNEL)  // duplicate -> rejected
+    expect("service: rejected add does not notify", fired == 1, "fired=\(fired)")
+
+    let ruleId = svc.rules(forPeerId: CHANNEL).first!.id
+    _ = svc.setEnabled(false, id: ruleId)
+    expect("service: toggle notifies", fired == 2, "fired=\(fired)")
+
+    _ = svc.remove(id: ruleId)
+    expect("service: remove notifies", fired == 3, "fired=\(fired)")
+
+    _ = svc.remove(id: "nonexistent")
+    expect("service: no-op remove does not notify", fired == 3, "fired=\(fired)")
+
+    token.cancel()
+    _ = svc.add(text: "bbb", peerId: CHANNEL)
+    expect("service: cancelled observer stops firing", fired == 3, "fired=\(fired)")
+}
+
+do {
+    // Observation must not outlive its token, or handlers leak.
+    let svc = newService()
+    var fired = 0
+    do {
+        let token = svc.observeChanges { fired += 1 }
+        _ = token  // released at end of scope
+    }
+    _ = svc.add(text: "ccc", peerId: CHANNEL)
+    expect("service: released observation auto-cancels", fired == 0, "fired=\(fired)")
+}
+
 print("\n\(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)
