@@ -6,7 +6,11 @@ on:
   workflow_dispatch:
     inputs:
       build_ipa:
-        description: 'Also run the full IPA build (~1-2 hours)'
+        description: 'Build the device IPA (~1-2 hours). Needs real signing to install.'
+        type: boolean
+        default: false
+      build_simulator:
+        description: 'Build the Simulator app (~1-2 hours). Runs on a Mac with no signing at all.'
         type: boolean
         default: false
 
@@ -220,4 +224,94 @@ jobs:
           name: Swiftgram-DSYMs-${{ env.BUILD_NUMBER }}
           path: /Users/Shared/telegram-ios/build/artifacts/DSYMs.zip
           if-no-files-found: warn
+          retention-days: 14
+
+  # Simulator build. This is the route to actually TESTING the features:
+  # a simulator app needs no provisioning profile, no Team ID and no Apple account -
+  # only a real api_id, without which Telegram rejects the login (API_ID_PUBLISHED_FLOOD).
+  # Telegram's own bundle id is kept so the bundled fake-codesigning profiles still satisfy
+  # the unconditional aps-environment check in Make.py; that is harmless here because the
+  # Simulator has no real Telegram to collide with.
+  simulator:
+    runs-on: macos-latest
+    needs: logic-tests
+    if: github.event_name == 'workflow_dispatch' && inputs.build_simulator
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+          fetch-depth: '0'
+
+      - name: Set active Xcode path
+        run: |
+          XCODE_VERSION=$(python3 -c 'import json;print(json.load(open("versions.json"))["xcode"])')
+          sudo xcode-select -s /Applications/Xcode_$XCODE_VERSION.app/Contents/Developer
+
+      - name: Generate build configuration
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+        run: |
+          if [ -z "$TELEGRAM_API_ID" ] || [ -z "$TELEGRAM_API_HASH" ]; then
+            echo "::warning::No TELEGRAM_API_ID/TELEGRAM_API_HASH secrets. Building with the published sample credentials - the app will compile and launch but CANNOT SIGN IN (API_ID_PUBLISHED_FLOOD). Add the secrets to produce a testable build."
+          fi
+          python3 - <<'PY'
+          import json, os
+          with open("build-system/appstore-configuration.json") as f:
+              config = json.load(f)
+          config.setdefault("sg_config", "")
+          config["api_id"] = os.environ.get("TELEGRAM_API_ID") or "8"
+          config["api_hash"] = os.environ.get("TELEGRAM_API_HASH") or "7245de8e747a0d6fbe11f7cc14fcc0bb"
+          config["is_appstore_build"] = "false"
+          config["is_internal_build"] = "true"
+          with open("build-system/personal-configuration.json", "w") as f:
+              json.dump(config, f, indent=2)
+          print("api_id in use:", config["api_id"])
+          PY
+
+      - name: Create canonical source directory
+        run: |
+          set -x
+          sudo mkdir -p /Users/Shared
+          cp -R $GITHUB_WORKSPACE /Users/Shared/
+          mv /Users/Shared/$(basename $GITHUB_WORKSPACE) /Users/Shared/telegram-ios
+
+      - name: Build for Simulator
+        run: |
+          set -x
+          cd /Users/Shared/telegram-ios
+          BUILD_NUMBER_OFFSET="$(cat build_number_offset)"
+          export BUILD_NUMBER="$(( $(git rev-list --count HEAD) + BUILD_NUMBER_OFFSET ))"
+          echo "BUILD_NUMBER=$BUILD_NUMBER" >> $GITHUB_ENV
+
+          python3 build-system/Make/ImportCertificates.py --path build-system/fake-codesigning/certs
+          python3 -u build-system/Make/Make.py \
+            --bazelUserRoot="/private/var/tmp/_bazel_containerhost" \
+            build \
+            --configurationPath="build-system/personal-configuration.json" \
+            --codesigningInformationPath=build-system/fake-codesigning \
+            --configuration=release_sim_arm64 \
+            --buildNumber="$BUILD_NUMBER"
+
+          OUTPUT_PATH="build/artifacts"
+          rm -rf "$OUTPUT_PATH"; mkdir -p "$OUTPUT_PATH"
+
+          # A simulator build emits an .app bundle rather than an .ipa.
+          APP_PATH="$(find -L bazel-bin bazel-out -maxdepth 6 -name 'Swiftgram.app' -type d 2>/dev/null | head -1)"
+          if [ -z "$APP_PATH" ]; then
+            echo "::error::Build finished but no Swiftgram.app was found."
+            find -L bazel-bin -maxdepth 4 -name '*.app' 2>/dev/null | head -20
+            exit 1
+          fi
+          echo "found app: $APP_PATH"
+          cp -R "$APP_PATH" "$OUTPUT_PATH/"
+          ls -la "$OUTPUT_PATH"
+
+      - name: Upload Simulator app
+        uses: actions/upload-artifact@v4
+        with:
+          name: Swiftgram-Simulator-${{ env.BUILD_NUMBER }}
+          path: /Users/Shared/telegram-ios/build/artifacts/Swiftgram.app
+          if-no-files-found: error
           retention-days: 14
