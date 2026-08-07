@@ -268,5 +268,54 @@ do {
     expectEq("end-to-end: stored rule cleans the post", out.text, "כותרת הידיעה החשובה")
 }
 
+// ================================================================ range API (integration surface)
+
+do {
+    // Positional contract: result[i] corresponds to input[i]. TelegramCore entities carry a
+    // rich type that must survive, so callers keep their own values and only remap ranges.
+    let rules = [SGRemovalRule(text: "BBB", peerId: CHANNEL)]
+    let input = [
+        NSRange(location: 0, length: 3),   // AAA - before the cut
+        NSRange(location: 4, length: 3),   // BBB - inside the cut, must become nil
+        NSRange(location: 8, length: 3),   // CCC - after the cut
+    ]
+    let out = SGTextRemover.strip(text: "AAA BBB CCC", entityRanges: input, rules: rules, peerId: CHANNEL)
+    expect("range API: arity preserved", out.mappedRanges.count == input.count)
+    expect("range API: index 1 removed", out.mappedRanges[1] == nil)
+    let ns = out.text as NSString
+    expectEq("range API: index 0 still AAA", out.mappedRanges[0].map { ns.substring(with: $0) } ?? "<nil>", "AAA")
+    expectEq("range API: index 2 still CCC", out.mappedRanges[2].map { ns.substring(with: $0) } ?? "<nil>", "CCC")
+}
+
+do {
+    // No match must be a true no-op so render paths can skip work entirely.
+    let rules = [SGRemovalRule(text: "absent", peerId: CHANNEL)]
+    let input = [NSRange(location: 0, length: 2)]
+    let out = SGTextRemover.strip(text: "hello world", entityRanges: input, rules: rules, peerId: CHANNEL)
+    expectEq("range API: no-op keeps text", out.text, "hello world")
+    expect("range API: no-op keeps ranges", out.mappedRanges[0] == input[0])
+}
+
+do {
+    // Every surviving range must stay inside the new string - an out-of-bounds entity
+    // would be applied against an NSString at render time.
+    let rules = [SGRemovalRule(text: "למבזק המיוחד לחצו כאן", peerId: CHANNEL)]
+    let post = "כותרת חשובה כאן\n\nלמבזק המיוחד לחצו כאן"
+    let input = [NSRange(location: 0, length: 6), NSRange(location: 7, length: 5)]
+    let out = SGTextRemover.strip(text: post, entityRanges: input, rules: rules, peerId: CHANNEL)
+    let len = (out.text as NSString).length
+    let inBounds = out.mappedRanges.compactMap { $0 }.allSatisfy { $0.location >= 0 && $0.location + $0.length <= len }
+    expect("range API: survivors stay in bounds", inBounds,
+           "len=\(len) ranges=\(out.mappedRanges.map { $0.map { "\($0.location)+\($0.length)" } ?? "nil" })")
+}
+
+do {
+    // Empty entity list is the common case and must not crash.
+    let rules = [SGRemovalRule(text: "junk", peerId: CHANNEL)]
+    let out = SGTextRemover.strip(text: "keep junk", entityRanges: [], rules: rules, peerId: CHANNEL)
+    expectEq("range API: empty entities", out.text, "keep")
+    expect("range API: empty result", out.mappedRanges.isEmpty)
+}
+
 print("\n\(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)

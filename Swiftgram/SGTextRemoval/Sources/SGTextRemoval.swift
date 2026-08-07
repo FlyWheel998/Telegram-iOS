@@ -158,8 +158,41 @@ public enum SGTextRemover {
         return merged
     }
 
-    /// Applies removals to text and shifts/clips entities to stay aligned.
-    /// Returns the original untouched if nothing matched, so callers can cheaply detect a no-op.
+    /// Applies removals to text, remapping caller-supplied ranges to stay aligned.
+    ///
+    /// Ranges are UTF-16 — matching `NSRange` and TelegramCore's `MessageTextEntity.range`,
+    /// which `stringWithAppliedEntities` converts directly into an `NSRange` against an
+    /// `NSString`. Results are positional: `entityRanges[i]` maps to element `i` of the result,
+    /// or `nil` if that span was removed entirely. Returning ranges rather than entities lets
+    /// callers keep their own richly-typed values instead of round-tripping through a lossy type.
+    public static func strip(
+        text: String,
+        entityRanges: [NSRange],
+        rules: [SGRemovalRule],
+        peerId: Int64
+    ) -> (text: String, mappedRanges: [NSRange?]) {
+        let ranges = removalRanges(in: text, rules: rules, peerId: peerId)
+        guard !ranges.isEmpty else { return (text, entityRanges.map { Optional($0) }) }
+
+        var result = text as NSString
+        var working: [NSRange?] = entityRanges.map { Optional($0) }
+
+        for range in ranges.reversed() {
+            result = result.replacingCharacters(in: range, with: "") as NSString
+            working = working.map { $0.flatMap { shiftRange($0, removing: range) } }
+        }
+        if let cut = trailingWhitespaceRange(result) {
+            result = result.replacingCharacters(in: cut, with: "") as NSString
+            working = working.map { $0.flatMap { shiftRange($0, removing: cut) } }
+        }
+        if let cut = leadingWhitespaceRange(result) {
+            result = result.replacingCharacters(in: cut, with: "") as NSString
+            working = working.map { $0.flatMap { shiftRange($0, removing: cut) } }
+        }
+        return (result as String, working)
+    }
+
+    /// Convenience overload keeping the `SGEntity` shape. Used by the tests.
     public static func strip(
         text: String,
         entities: [SGEntity],
@@ -193,25 +226,30 @@ public enum SGTextRemover {
     }
 
     static func shift(_ entity: SGEntity, removing cut: NSRange) -> SGEntity? {
-        let eStart = entity.range.location
-        let eEnd = eStart + entity.range.length
+        guard let moved = shiftRange(entity.range, removing: cut) else { return nil }
+        var updated = entity
+        updated.range = moved
+        return updated
+    }
+
+    /// Repositions a single UTF-16 range around an excised span.
+    /// Returns nil when the range lay entirely inside the removed text.
+    static func shiftRange(_ range: NSRange, removing cut: NSRange) -> NSRange? {
+        let eStart = range.location
+        let eEnd = eStart + range.length
         let cStart = cut.location
         let cEnd = cStart + cut.length
 
-        if eEnd <= cStart { return entity }                     // entirely before the cut
+        if eEnd <= cStart { return range }                      // entirely before the cut
         if eStart >= cEnd {                                     // entirely after
-            var moved = entity
-            moved.range = NSRange(location: eStart - cut.length, length: entity.range.length)
-            return moved
+            return NSRange(location: eStart - cut.length, length: range.length)
         }
         // Overlapping: keep whatever survives on each side, dropping the excised middle.
         let survivingBefore = max(0, cStart - eStart)
         let survivingAfter = max(0, eEnd - cEnd)
         let newLength = survivingBefore + survivingAfter
         guard newLength > 0 else { return nil }
-        var clipped = entity
-        clipped.range = NSRange(location: min(eStart, cStart), length: newLength)
-        return clipped
+        return NSRange(location: min(eStart, cStart), length: newLength)
     }
 
     static func trailingWhitespaceRange(_ s: NSString) -> NSRange? {
