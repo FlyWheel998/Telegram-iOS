@@ -66,6 +66,7 @@ private enum SGBoolSetting: String {
     case disableDeleteChatSwipeOption
     case quickTranslateButton
     case hideReactions
+    case hideCommentsButton
     case showRepostToStory
     case contextShowSelectFromUser
     case contextShowSaveToCloud
@@ -326,6 +327,7 @@ private func SGControllerEntries(presentationData: PresentationData, callListSet
     entries.append(.toggle(id: id.count, section: .other, settingName: .disableScrollToNextChannel, value: !SGSimpleSettings.shared.disableScrollToNextChannel, text: i18n("Settings.PullToNextChannel", lang), enabled: true))
     entries.append(.toggle(id: id.count, section: .other, settingName: .disableScrollToNextTopic, value: !SGSimpleSettings.shared.disableScrollToNextTopic, text: i18n("Settings.PullToNextTopic", lang), enabled: true))
     entries.append(.toggle(id: id.count, section: .other, settingName: .hideReactions, value: SGSimpleSettings.shared.hideReactions, text: i18n("Settings.HideReactions", lang), enabled: true))
+    entries.append(.toggle(id: id.count, section: .other, settingName: .hideCommentsButton, value: SGSimpleSettings.shared.hideCommentsButton, text: i18n("Settings.HideCommentsButton", lang), enabled: true))
     entries.append(.toggle(id: id.count, section: .other, settingName: .uploadSpeedBoost, value: SGSimpleSettings.shared.uploadSpeedBoost, text: i18n("Settings.UploadsBoost", lang), enabled: true))
     entries.append(.oneFromManySelector(id: id.count, section: .other, settingName: .downloadSpeedBoost, text: i18n("Settings.DownloadsBoost", lang), value: i18n("Settings.DownloadsBoost.\(SGSimpleSettings.shared.downloadSpeedBoost)", lang), enabled: true))
     entries.append(.notice(id: id.count, section: .other, text: i18n("Settings.DownloadsBoost.Notice", lang)))
@@ -425,6 +427,8 @@ public func sgSettingsController(context: AccountContext/*, focusOnItemTag: Int?
             SGSimpleSettings.shared.quickTranslateButton = value
         case .uploadSpeedBoost:
             SGSimpleSettings.shared.uploadSpeedBoost = value
+        case .hideCommentsButton:
+            SGSimpleSettings.shared.hideCommentsButton = value
         case .hideReactions:
             SGSimpleSettings.shared.hideReactions = value
         case .showRepostToStory:

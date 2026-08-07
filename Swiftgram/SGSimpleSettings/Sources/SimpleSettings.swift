@@ -67,6 +67,7 @@ public class SGSimpleSettings {
             { let _ = self.stickerSize },
             { let _ = self.stickerTimestamp },
             { let _ = self.hideReactions },
+            { let _ = self.hideCommentsButton },
             { let _ = self.disableGalleryCamera },
             { let _ = self.disableSendAsButton },
             { let _ = self.disableSnapDeletionEffect },
@@ -111,6 +112,7 @@ public class SGSimpleSettings {
         case quickTranslateButton
         case outgoingLanguageTranslation
         case hideReactions
+        case hideCommentsButton
         case showRepostToStory
         case showRepostToStoryV2
         case contextShowSelectFromUser
@@ -270,6 +272,7 @@ public class SGSimpleSettings {
         Keys.quickTranslateButton.rawValue: false,
         Keys.outgoingLanguageTranslation.rawValue: [:],
         Keys.hideReactions.rawValue: false,
+        Keys.hideCommentsButton.rawValue: false,
         Keys.showRepostToStory.rawValue: true,
         Keys.contextShowSelectFromUser.rawValue: true,
         Keys.contextShowSaveToCloud.rawValue: true,
@@ -402,6 +405,11 @@ public class SGSimpleSettings {
     
     @UserDefault(key: Keys.hideReactions.rawValue)
     public var hideReactions: Bool
+
+    /// Hides the per-post "N comments" button under channel posts. Distinct from
+    /// hideChannelBottomButton, which hides the full-width Discuss button in the compose bar.
+    @UserDefault(key: Keys.hideCommentsButton.rawValue)
+    public var hideCommentsButton: Bool
 
     // @available(*, deprecated, message: "Use showRepostToStoryV2 instead")
     @UserDefault(key: Keys.showRepostToStory.rawValue)

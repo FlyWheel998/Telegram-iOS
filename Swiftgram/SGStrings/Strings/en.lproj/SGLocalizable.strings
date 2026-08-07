@@ -281,3 +281,4 @@
 "TextRemoval.RemoveFromPosts" = "Remove From Posts";
 "TextRemoval.SectionHeader" = "Removed Text";
 "TextRemoval.Empty" = "Select text in a channel post and choose \"Remove From Posts\" to hide it everywhere in that channel.";
+"Settings.HideCommentsButton" = "Hide Comments Button";

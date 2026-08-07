@@ -505,7 +505,9 @@ private func contentNodeMessagesAndClassesForItem(_ item: ChatMessageItem) -> ([
     }
     
     if !isAction && !hasSeparateCommentsButton && !Namespaces.Message.allNonRegular.contains(firstMessage.id.namespace) && !hideAllAdditionalInfo {
-        if hasCommentButton(item: item) {
+        // MARK: Swiftgram - omit the per-post comments button entirely rather than hiding it,
+        // so the bubble reflows instead of leaving a gap where the button used to be.
+        if hasCommentButton(item: item) && !SGSimpleSettings.shared.hideCommentsButton {
             result.append((firstMessage, ChatMessageCommentFooterContentNode.self, ChatMessageEntryAttributes(), BubbleItemAttributes(isAttachment: true, neighborType: .footer, neighborSpacing: .default)))
         }
     }
