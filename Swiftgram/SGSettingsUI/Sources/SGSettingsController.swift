@@ -3,6 +3,7 @@ import SGLogging
 import SGSimpleSettings
 import SGStrings
 import SGAPIToken
+import SGTextRemovalUI
 
 import SGItemListUI
 import Foundation
@@ -127,6 +128,7 @@ private enum SGSliderSetting: String {
 private enum SGDisclosureLink: String {
     case contentSettings
     case languageSettings
+    case textRemoval
 }
 
 private struct PeerNameColorScreenState: Equatable {
@@ -167,7 +169,12 @@ private func SGControllerEntries(presentationData: PresentationData, callListSet
     } else {
         id.increment(1)
     }
-    
+
+    // MARK: Swiftgram - manage per-channel text removal rules.
+    // This is the only way to review or undo a rule, so it is always shown rather than
+    // hidden when empty: a user who removed the wrong text needs to be able to find it.
+    entries.append(.disclosure(id: id.count, section: .content, link: .textRemoval, text: i18n("TextRemoval.SectionHeader", lang)))
+
     entries.append(.header(id: id.count, section: .tabs, text: i18n("Settings.Tabs.Header", lang), badge: nil))
     entries.append(.toggle(id: id.count, section: .tabs, settingName: .hideTabBar, value: SGSimpleSettings.shared.hideTabBar, text: i18n("Settings.Tabs.HideTabBar", lang), enabled: true))
     entries.append(.toggle(id: id.count, section: .tabs, settingName: .showContactsTab, value: callListSettings.showContactsTab, text: i18n("Settings.Tabs.ShowContacts", lang), enabled: !SGSimpleSettings.shared.hideTabBar))
@@ -691,6 +698,8 @@ public func sgSettingsController(context: AccountContext/*, focusOnItemTag: Int?
                     }
                     strongContext.sharedContext.applicationBindings.openUrl(url)
                 })
+            case .textRemoval:
+                pushControllerImpl?(sgTextRemovalController(context: context))
         }
     }, searchInput: { searchQuery in
         updateState { state in
