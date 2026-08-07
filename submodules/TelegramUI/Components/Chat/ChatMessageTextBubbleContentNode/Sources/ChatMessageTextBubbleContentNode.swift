@@ -3,6 +3,8 @@ import UIKit
 import AsyncDisplayKit
 import Display
 import TelegramCore
+// MARK: Swiftgram
+import SGTextRemoval
 import TextFormat
 import UrlEscaping
 import TelegramUniversalVideoContent
@@ -456,6 +458,42 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
                     }
                 }
                 
+                // MARK: Swiftgram - remove user-selected text
+                //
+                // Deliberately placed here: after the translation branch above, which replaces
+                // rawText with TranslationMessageAttribute.text, so one hook covers the original
+                // and the translated text alike; and before entity derivation below, so
+                // CachedChatMessageText is keyed on the already-stripped string.
+                //
+                // MessageTextEntity.range is UTF-16 (stringWithAppliedEntities converts it
+                // directly into an NSRange), which matches the remover's range space exactly.
+                let sgRemovalPeerId = item.message.id.peerId.toInt64()
+                if SGTextRemovalService.shared.hasRules(forPeerId: sgRemovalPeerId) {
+                    let sgInputEntities = messageEntities ?? []
+                    let sgInputRanges = sgInputEntities.map {
+                        NSRange(location: $0.range.lowerBound, length: $0.range.upperBound - $0.range.lowerBound)
+                    }
+                    let sgStripped = SGTextRemovalService.shared.strip(
+                        text: rawText,
+                        entityRanges: sgInputRanges,
+                        peerId: sgRemovalPeerId
+                    )
+                    if sgStripped.text != rawText {
+                        rawText = sgStripped.text
+                        if messageEntities != nil {
+                            var sgRemapped: [MessageTextEntity] = []
+                            for (index, entity) in sgInputEntities.enumerated() {
+                                guard let mapped = sgStripped.mappedRanges[index] else { continue }
+                                sgRemapped.append(MessageTextEntity(
+                                    range: mapped.location ..< (mapped.location + mapped.length),
+                                    type: entity.type
+                                ))
+                            }
+                            messageEntities = sgRemapped
+                        }
+                    }
+                }
+
                 var formattedDateUpdatePeriod: Int32?
                 if let messageEntities {
                     for entity in messageEntities {

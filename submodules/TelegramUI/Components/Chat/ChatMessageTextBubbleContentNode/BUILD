@@ -10,6 +10,7 @@ swift_library(
         "-warnings-as-errors",
     ],
     deps = [
+        "//Swiftgram/SGTextRemoval:SGTextRemoval",
         "//submodules/AsyncDisplayKit",
         "//submodules/Display",
         "//submodules/TelegramCore",
